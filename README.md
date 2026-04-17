@@ -96,6 +96,7 @@ bind "Alt t" {
 
 The plugin requests:
 
-- `ChangeApplicationState` — create tabs from layout KDL
+- `ReadApplicationState` — required for `dump_layout` (Zellij returns the layout KDL over the plugin command channel; without this permission the response is empty and you may see stdin EOF / decode errors)
+- `ChangeApplicationState` — apply layout via `new_tabs_with_layout`
 
 You must approve the permission prompt once per plugin version.

@@ -54,6 +54,41 @@ impl State {
         out
     }
 
+    fn wrap_text_to_width(text: &str, width: usize) -> Vec<String> {
+        let width = width.max(1);
+        let mut lines: Vec<String> = Vec::new();
+
+        for paragraph in text.split('\n') {
+            let paragraph = paragraph.trim_end_matches('\r');
+            if paragraph.is_empty() {
+                lines.push(String::new());
+                continue;
+            }
+
+            let mut current = String::new();
+            for word in paragraph.split_whitespace() {
+                if current.is_empty() {
+                    current.push_str(word);
+                    continue;
+                }
+
+                if current.len() + 1 + word.len() <= width {
+                    current.push(' ');
+                    current.push_str(word);
+                } else {
+                    lines.push(current);
+                    current = word.to_string();
+                }
+            }
+
+            if !current.is_empty() {
+                lines.push(current);
+            }
+        }
+
+        lines
+    }
+
     fn load_entries(&mut self) {
         self.entries.clear();
         self.error = None;
@@ -127,7 +162,7 @@ impl State {
             Ok(kdl) => kdl,
             Err(e) => {
                 self.error = Some(format!(
-                    "dump_layout(\"{}\") failed: {} (hint: restart Zellij after changing layout_dir; ensure the layout exists under layout_dir)",
+                    "dump_layout(\"{}\") failed: {} (hint: grant ReadApplicationState; restart Zellij after layout_dir changes; ensure layout exists under layout_dir)",
                     entry.layout_name, e
                 ));
                 return;
@@ -191,7 +226,10 @@ impl ZellijPlugin for State {
             EventType::PermissionRequestResult,
         ]);
 
-        request_permission(&[PermissionType::ChangeApplicationState]);
+        request_permission(&[
+            PermissionType::ReadApplicationState,
+            PermissionType::ChangeApplicationState,
+        ]);
     }
 
     fn update(&mut self, event: Event) -> bool {
@@ -212,7 +250,8 @@ impl ZellijPlugin for State {
                     PermissionStatus::Denied => {
                         self.permissions_resolved = true;
                         self.error = Some(
-                            "Plugin permissions denied (need ChangeApplicationState).".to_string(),
+                            "Plugin permissions denied (need ReadApplicationState and ChangeApplicationState)."
+                                .to_string(),
                         );
                     }
                 }
@@ -243,8 +282,9 @@ impl ZellijPlugin for State {
                 match mouse {
                     Mouse::LeftClick(line, _col) => {
                         let line = line as usize;
-                        if line >= 2 {
-                            let idx = self.scroll + (line - 2);
+                        const HEADER_ROWS: usize = 2; // title + hint
+                        if line >= HEADER_ROWS {
+                            let idx = self.scroll + (line - HEADER_ROWS);
                             if idx < self.entries.len() {
                                 self.selected = idx;
                             }
@@ -281,22 +321,41 @@ impl ZellijPlugin for State {
             return;
         }
 
+        let content_rows = rows.saturating_sub(1);
         if let Some(err) = &self.error {
-            let mut msg = err.clone();
-            if msg.len() > cols {
-                msg.truncate(cols.saturating_sub(1));
+            let mut err_lines = Self::wrap_text_to_width(err, cols);
+            if err_lines.is_empty() {
+                err_lines.push(String::new());
             }
-            println!("{msg: <width$}", width = cols);
-        } else {
-            let hint = "Up/Down: select • Enter: open • Esc: close • r: reload";
-            let mut msg = hint.to_string();
-            if msg.len() > cols {
-                msg.truncate(cols.saturating_sub(1));
+
+            let max_err_rows = content_rows.max(1);
+            if err_lines.len() > max_err_rows {
+                err_lines.truncate(max_err_rows.saturating_sub(1));
+                err_lines.push("… (error truncated; widen floating pane)".to_string());
             }
-            println!("{msg: <width$}", width = cols);
+
+            for line in &err_lines {
+                println!("{line: <width$}", width = cols);
+            }
+
+            for _ in err_lines.len()..content_rows {
+                println!("{: <width$}", "", width = cols);
+            }
+            return;
         }
 
-        let list_rows = rows.saturating_sub(2);
+        let hint = "Up/Down: select • Enter: open • Esc: close • r: reload";
+        let hint_reserved = 1usize.min(content_rows);
+        let hint_line = Self::wrap_text_to_width(hint, cols)
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        println!("{hint_line: <width$}", width = cols);
+        for _ in 1..hint_reserved {
+            println!("{: <width$}", "", width = cols);
+        }
+
+        let list_rows = content_rows.saturating_sub(hint_reserved);
         self.ensure_visible(list_rows);
 
         for i in 0..list_rows {
