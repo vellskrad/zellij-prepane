@@ -1,0 +1,10 @@
+[package]
+name = "prepane"
+version = "0.1.0"
+edition = "2021"
+description = "Zellij plugin: tab template picker (prepane)"
+license = "MIT"
+
+[dependencies]
+zellij-tile = "0.44.1"
+kdl = "4.7.1"
